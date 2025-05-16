@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Flock That!</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    width: 100%;
+    font-family: 'Arial Black', Gadget, sans-serif;
+    background-color: #eaf6ff;
+    color: #003366;
+    text-align: center;
+    box-sizing: border-box;
+  }
+  h1 {
+    color: #005c99;
+    font-size: 1.8em;
+    margin: 5px 0;
+  }
+  canvas {
+    display: block;
+    background-color: #ffffff;
+    width: 95vw;
+    height: 40vh;
+    max-width: 760px;
+    margin: 0 auto;
+    border: 2px solid #3399ff;
+  }
+  .controls, .info {
+    margin-top: 5px;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 0.9em;
+  }
+  button, select {
+    background-color: #3399ff;
+    color: #ffffff;
+    border: none;
+    padding: 6px 10px;
+    font-size: 0.9em;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+  }
+  button:hover, select:hover {
+    background-color: #66b3ff;
+  }
+  .info span {
+    margin: 4px 8px;
+    font-size: 1em;
+    font-weight: bold;
+  }
+  .nounType {
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #0066cc;
+    display: block;
+    margin-top: 5px;
+  }
+  #feedback {
+    display: block;
+    margin: 6px 0;
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #005c99;
+    min-height: 28px;
+  }
+  #instructions {
+    max-width: 95vw;
+    margin: 5px auto;
+    background-color: #d0eaff;
+    padding: 8px;
+    border-radius: 6px;
+    font-size: 0.9em;
+    line-height: 1.3em;
+  }
+</style>
+</head>
+<body>
+<h1>Flock That!</h1>
+<div id="instructions">
+  <strong>How to Play:</strong><br>
+  Shoot the words that match the current noun type shown above. Click on targets to shoot. The noun type changes after 3 correct hits in a row. Avoid incorrect nouns—they’ll cost you points and summon Mr. Markuss’s snark.
+</div>
+<canvas id="gameCanvas"></canvas>
+<div class="controls">
+  <select id="timerSelect">
+    <option value="30"⏱️ 30s</option>
+    <option value="60" selected>⏱️ 1 min</option>
+    <option value="90">⏱️ 1:30</option>
+    <option value="120">⏱️ 2 min</option>
+  </select>
+  <select id="speedSelect">
+    <option value="2">🐢 Slow</option>
+    <option value="5" selected>🚶 Medium</option>
+    <option value="8">🏃 Fast</option>
+  </select>
+  <button onclick="startGame()">▶️ Start</button>
+  <button onclick="pauseGame()">⏸️ Pause</button>
+  <button onclick="resumeGame()">⏯️ Resume</button>
+  <button onclick="stopGame()">⏹️ Stop</button>
+</div>
+<div class="info">
+  <span id="time">⏱️ Time: 0s</span>
+  <span id="score">🎯 Score: 0</span>
+</div>
+<span class="nounType" id="nounType"></span>
+<span id="feedback"></span>
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+function resizeCanvas() {
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+  ctx.font = "bold 20px Arial";
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+let gameInterval, timerInterval;
+let remainingTime = 60;
+let speed = 5;
+let score = 0;
+let running = false;
+let currentNounType = "Singular Noun";
+let flyingWords = [];
+let hitStreak = 0;
+
+const nounTypes = ["Singular Noun", "Plural Noun", "Collective Noun"];
+const wordBank = {
+  "Singular Noun": ["cat", "apple", "school", "desk", "pen", "guitar", "friend", "mountain", "river", "cup", "house", "idea", "camera", "book", "window", "bird", "cookie", "pencil", "shoe", "ball"],
+  "Plural Noun": ["cats", "apples", "schools", "desks", "pens", "guitars", "friends", "mountains", "rivers", "cups", "houses", "ideas", "cameras", "books", "windows", "birds", "cookies", "pencils", "shoes", "balls"],
+  "Collective Noun": ["team", "flock", "crew", "class", "group", "band", "pack", "bunch", "audience", "army", "crowd", "committee", "family", "staff", "panel", "troupe", "fleet", "choir", "school", "gang"]
+};
+const compliments = ["Nice shot!", "Right on target!", "Grammar goals!", "You’re crushing it!"];
+const sarcastic = ["Interesting choice... not right though.", "That’s a noun. Just not the right kind.", "We’re aiming for *correct*, not creative.", "At least you clicked something!"];
+
+function updateGameStatus() {
+  document.getElementById("score").textContent = `🎯 Score: ${score}`;
+  document.getElementById("time").textContent = `⏱️ Time: ${remainingTime}s`;
+}
+function changeNounType() {
+  let newType;
+  do {
+    newType = nounTypes[Math.floor(Math.random() * nounTypes.length)];
+  } while (newType === currentNounType);
+  currentNounType = newType;
+  document.getElementById("nounType").textContent = `Shoot only: ${currentNounType}`;
+  hitStreak = 0;
+}
+function getNonOverlappingY() {
+  let y;
+  let attempts = 0;
+  do {
+    y = 30 + Math.random() * (canvas.height - 60);
+    attempts++;
+  } while (flyingWords.some(w => Math.abs(w.y - y) < 40) && attempts < 10);
+  return y;
+}
+function addWord() {
+  const allWords = Object.values(wordBank).flat();
+  const correct = Math.random() < 0.5;
+  const source = correct ? wordBank[currentNounType] : allWords.filter(w => !wordBank[currentNounType].includes(w));
+  const text = source[Math.floor(Math.random() * source.length)];
+  const y = getNonOverlappingY();
+  flyingWords.push({ text, correct, x: canvas.width, y });
+}
+function drawWords() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (let word of flyingWords) {
+    const width = ctx.measureText(word.text).width + 20;
+    ctx.beginPath();
+    ctx.fillStyle = "#99ccff";
+    ctx.roundRect(word.x - 10, word.y - 20, width, 35, 8);
+    ctx.fill();
+    ctx.fillStyle = "#003366";
+    ctx.fillText(word.text, word.x, word.y);
+    word.x -= speed;
+  }
+  flyingWords = flyingWords.filter(w => w.x > -200);
+}
+CanvasRenderingContext2D.prototype.roundRect = function (x, y, width, height, radius) {
+  this.beginPath();
+  this.moveTo(x + radius, y);
+  this.lineTo(x + width - radius, y);
+  this.quadraticCurveTo(x + width, y, x + width, y + radius);
+  this.lineTo(x + width, y + height - radius);
+  this.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  this.lineTo(x + radius, y + height);
+  this.quadraticCurveTo(x, y + height, x, y + height - radius);
+  this.lineTo(x, y + radius);
+  this.quadraticCurveTo(x, y, x + radius, y);
+  this.closePath();
+};
+canvas.addEventListener("click", e => {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  for (let i = 0; i < flyingWords.length; i++) {
+    const word = flyingWords[i];
+    const width = ctx.measureText(word.text).width + 20;
+    if (x > word.x - 10 && x < word.x + width - 10 && y > word.y - 20 && y < word.y + 15) {
+      flyingWords.splice(i, 1);
+      const feedback = word.correct ? compliments[Math.floor(Math.random() * compliments.length)] : sarcastic[Math.floor(Math.random() * sarcastic.length)];
+      document.getElementById("feedback").textContent = `Mr. Markuss: ${feedback}`;
+      score += word.correct ? 10 : -5;
+      hitStreak = word.correct ? hitStreak + 1 : 0;
+      if (hitStreak >= 3) changeNounType();
+      updateGameStatus();
+      break;
+    }
+  }
+});
+function update() {
+  if (Math.random() < 0.15) addWord();
+  drawWords();
+}
+function startGame() {
+  stopGame();
+  score = 0;
+  flyingWords = [];
+  remainingTime = parseInt(document.getElementById("timerSelect").value);
+  speed = parseInt(document.getElementById("speedSelect").value);
+  running = true;
+  document.getElementById("feedback").textContent = "";
+  changeNounType();
+  updateGameStatus();
+  gameInterval = setInterval(update, 100);
+  timerInterval = setInterval(() => {
+    remainingTime--;
+    updateGameStatus();
+    if (remainingTime <= 0) stopGame();
+  }, 1000);
+}
+function pauseGame() {
+  clearInterval(gameInterval);
+  clearInterval(timerInterval);
+  running = false;
+}
+function resumeGame() {
+  if (!running && remainingTime > 0) {
+    running = true;
+    gameInterval = setInterval(update, 100);
+    timerInterval = setInterval(() => {
+      remainingTime--;
+      updateGameStatus();
+      if (remainingTime <= 0) stopGame();
+    }, 1000);
+  }
+}
+function stopGame() {
+  clearInterval(gameInterval);
+  clearInterval(timerInterval);
+  running = false;
+  flyingWords = [];
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  document.getElementById("nounType").textContent = "Game Over";
+  document.getElementById("time").textContent = "⏱️ Time: 0s";
+}
+</script>
+</body>
+</html>
